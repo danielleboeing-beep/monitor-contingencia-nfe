@@ -17,6 +17,7 @@ permissions:
 jobs:
   checar:
     runs-on: ubuntu-latest
+    timeout-minutes: 8   # nunca deixa a execucao passar de 8 minutos, mesmo travada
     steps:
       - name: Checkout do repositorio
         uses: actions/checkout@v4

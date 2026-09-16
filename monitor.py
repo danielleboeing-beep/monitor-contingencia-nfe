@@ -16,6 +16,7 @@ Dependencias: pip install requests beautifulsoup4
 import json
 import os
 import re
+import signal
 import time
 from datetime import datetime, timezone
 
@@ -49,23 +50,38 @@ NUM_CHECKS_PER_RUN = 2
 SECONDS_BETWEEN_CHECKS = 150
 
 
+class TempoExcedidoErro(Exception):
+    """Erro proprio para forcar a interrupcao de uma chamada de rede presa."""
+
+
+def _alarme(signum, frame):
+    raise TempoExcedidoErro("Tempo limite absoluto excedido (possivel travamento em DNS/conexao)")
+
+
 # ---------------------------------------------------------------- COLETA
 
-def buscar_com_retry(url, tentativas=2, espera_segundos=3):
-    """Busca a URL com ate 2 tentativas, para nao derrubar tudo por causa
-    de uma instabilidade passageira do site (comum em portais de governo).
-    Timeout curto (10s) para nao ficar presa se o site nao responder."""
+def buscar_com_retry(url, tentativas=2, espera_segundos=3, limite_absoluto_segundos=15):
+    """Busca a URL com ate 2 tentativas. Alem do timeout normal do requests,
+    usa um alarme do sistema (SIGALRM) como rede de seguranca: se a chamada
+    travar em qualquer etapa - inclusive resolucao de DNS, que o timeout do
+    requests nem sempre cobre - ela e interrompida na forca depois de
+    `limite_absoluto_segundos`, em vez de travar a execucao inteira."""
     ultimo_erro = None
     for tentativa in range(1, tentativas + 1):
+        handler_anterior = signal.signal(signal.SIGALRM, _alarme)
+        signal.alarm(limite_absoluto_segundos)
         try:
             resp = requests.get(url, headers=HEADERS, timeout=(5, 10))
             resp.encoding = resp.apparent_encoding or "utf-8"
             return resp
-        except requests.RequestException as erro:
+        except (requests.RequestException, TempoExcedidoErro) as erro:
             ultimo_erro = erro
             print(f"[AVISO] Tentativa {tentativa}/{tentativas} falhou para {url}: {erro}", flush=True)
             if tentativa < tentativas:
                 time.sleep(espera_segundos)
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, handler_anterior)
     raise ultimo_erro
 
 
@@ -229,11 +245,12 @@ def checar_e_alertar():
 # ---------------------------------------------------------------- MAIN
 
 def main():
+    print("[INICIO] Script comecou a rodar.", flush=True)
     for i in range(NUM_CHECKS_PER_RUN):
         try:
             checar_e_alertar()
         except Exception as erro:  # noqa: BLE001
-            print(f"[ERRO] Falha na verificacao: {erro}")
+            print(f"[ERRO] Falha na verificacao: {erro}", flush=True)
 
         if i < NUM_CHECKS_PER_RUN - 1:
             time.sleep(SECONDS_BETWEEN_CHECKS)

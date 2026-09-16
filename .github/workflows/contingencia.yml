@@ -6,15 +6,13 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}   # permite rodar manualmente na aba "Actions" pra testar
 
-# Evita que duas execucoes rodem ao mesmo tempo (o que causava o erro de push).
-# Se uma execucao ainda estiver rodando quando a proxima for agendada, essa
-# proxima fica na fila em vez de rodar em paralelo.
+# Evita que duas execucoes rodem ao mesmo tempo.
 concurrency:
   group: monitor-contingencia
   cancel-in-progress: false
 
 permissions:
-  contents: write   # necessario para comitar state.json e docs/index.html de volta
+  contents: write
 
 jobs:
   checar:
@@ -41,9 +39,29 @@ jobs:
 
       - name: Salvar estado e painel no repositorio (se mudou)
         run: |
+          set -e
           git config user.name "monitor-contingencia-bot"
           git config user.email "actions@users.noreply.github.com"
-          git pull --rebase --autostash origin main
+
           git add state.json docs/index.html
-          git diff --staged --quiet || git commit -m "chore: atualiza estado e painel [skip ci]"
-          git push
+          if git diff --staged --quiet; then
+            echo "Nada mudou, nada a comitar."
+            exit 0
+          fi
+          git commit -m "chore: atualiza estado e painel [skip ci]"
+
+          # Tenta subir; se alguem comitou antes, resolve preferindo a
+          # versao que acabamos de calcular (-X ours), que e sempre a
+          # leitura mais recente do site - nunca deixa marcador de
+          # conflito sobrar no arquivo.
+          for i in 1 2 3 4 5; do
+            if git push; then
+              echo "Push OK."
+              exit 0
+            fi
+            echo "Push falhou, tentativa $i - sincronizando..."
+            git pull --rebase -X ours origin main
+          done
+
+          echo "Nao foi possivel subir apos 5 tentativas."
+          exit 1

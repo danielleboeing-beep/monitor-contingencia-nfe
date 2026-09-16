@@ -60,7 +60,7 @@ def _alarme(signum, frame):
 
 # ---------------------------------------------------------------- COLETA
 
-def buscar_com_retry(url, tentativas=2, espera_segundos=3, limite_absoluto_segundos=15):
+def buscar_com_retry(url, tentativas=2, espera_segundos=3, limite_absoluto_segundos=30):
     """Busca a URL com ate 2 tentativas. Alem do timeout normal do requests,
     usa um alarme do sistema (SIGALRM) como rede de seguranca: se a chamada
     travar em qualquer etapa - inclusive resolucao de DNS, que o timeout do
@@ -71,7 +71,7 @@ def buscar_com_retry(url, tentativas=2, espera_segundos=3, limite_absoluto_segun
         handler_anterior = signal.signal(signal.SIGALRM, _alarme)
         signal.alarm(limite_absoluto_segundos)
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=(5, 10))
+            resp = requests.get(url, headers=HEADERS, timeout=(20, 20))
             resp.encoding = resp.apparent_encoding or "utf-8"
             return resp
         except (requests.RequestException, TempoExcedidoErro) as erro:

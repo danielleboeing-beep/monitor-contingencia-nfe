@@ -1,0 +1,41 @@
+name: Monitor Contingencia NF-e
+
+on:
+  schedule:
+    # Minimo permitido pelo GitHub Actions: 5 em 5 minutos.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}   # permite rodar manualmente na aba "Actions" pra testar
+
+permissions:
+  contents: write   # necessario para comitar state.json e docs/index.html de volta
+
+jobs:
+  checar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Instalar dependencias
+        run: pip install requests beautifulsoup4
+
+      - name: Rodar monitor (2 checagens, ~2min30s de intervalo)
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python monitor.py
+
+      - name: Gerar painel (docs/index.html)
+        run: python generate_dashboard.py
+
+      - name: Salvar estado e painel no repositorio (se mudou)
+        run: |
+          git config user.name "monitor-contingencia-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state.json docs/index.html
+          git diff --staged --quiet || git commit -m "chore: atualiza estado e painel [skip ci]"
+          git push

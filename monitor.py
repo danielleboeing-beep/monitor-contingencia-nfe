@@ -51,14 +51,30 @@ SECONDS_BETWEEN_CHECKS = 150
 
 # ---------------------------------------------------------------- COLETA
 
+def buscar_com_retry(url, tentativas=3, espera_segundos=5):
+    """Busca a URL com ate 3 tentativas, para nao derrubar tudo por causa
+    de uma instabilidade passageira do site (comum em portais de governo)."""
+    ultimo_erro = None
+    for tentativa in range(1, tentativas + 1):
+        try:
+            resp = requests.get(url, headers=HEADERS, timeout=20)
+            resp.encoding = resp.apparent_encoding or "utf-8"
+            return resp
+        except requests.RequestException as erro:
+            ultimo_erro = erro
+            print(f"[AVISO] Tentativa {tentativa}/{tentativas} falhou para {url}: {erro}")
+            if tentativa < tentativas:
+                time.sleep(espera_segundos)
+    raise ultimo_erro
+
+
 def status_svc_an_nacional():
     """
     Le o Portal Nacional e retorna:
       ativas:    set de UFs com SVC-AN ativada agora
       agendadas: dict {UF: "DD/MM/AAAA HH:MM:SS a DD/MM/AAAA HH:MM:SS"}
     """
-    resp = requests.get(NFE_PRINCIPAL_URL, headers=HEADERS, timeout=30)
-    resp.encoding = resp.apparent_encoding or "utf-8"
+    resp = buscar_com_retry(NFE_PRINCIPAL_URL)
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
     texto = re.sub(r"[ \t\r\n]+", " ", texto)
 
@@ -100,8 +116,7 @@ def status_svc_an_nacional():
 
 def status_svc_rs():
     """Retorna {UF: (ativa: bool, detalhe: str)} do painel SVC-RS por estado."""
-    resp = requests.get(SVC_RS_URL, headers=HEADERS, timeout=30)
-    resp.encoding = resp.apparent_encoding or "utf-8"
+    resp = buscar_com_retry(SVC_RS_URL)
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
     texto = re.sub(r"[ \t\r\n]+", " ", texto)
     # A pagina real tem espaco entre os separadores ("| |"), por isso o
@@ -161,12 +176,25 @@ def enviar_slack(uf, svc, situacao):
 def checar_e_alertar():
     estado_anterior = carregar_estado()
 
-    ativas_novas, agendadas_novas = status_svc_an_nacional()
-    svc_rs_novo = status_svc_rs()
-
     ativas_antigas = set(estado_anterior.get("svc_an_ativas", []))
     agendadas_antigas = estado_anterior.get("svc_an_agendadas", {})
     svc_rs_antigo = estado_anterior.get("svc_rs", {})
+
+    # Valores padrao: se uma fonte falhar mesmo depois das tentativas,
+    # repete o ultimo estado conhecido dela em vez de travar tudo ou
+    # zerar o que ja sabiamos.
+    ativas_novas, agendadas_novas = ativas_antigas, agendadas_antigas
+    svc_rs_novo = {uf: (v.get("ativa", False), "") for uf, v in svc_rs_antigo.items()}
+
+    try:
+        ativas_novas, agendadas_novas = status_svc_an_nacional()
+    except Exception as erro:  # noqa: BLE001
+        print(f"[ERRO] Nao foi possivel ler o Portal Nacional agora: {erro}")
+
+    try:
+        svc_rs_novo = status_svc_rs()
+    except Exception as erro:  # noqa: BLE001
+        print(f"[ERRO] Nao foi possivel ler o SVC-RS agora: {erro}")
 
     # --- SVC-AN ativada: transicoes ---
     for uf in ativas_novas - ativas_antigas:

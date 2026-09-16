@@ -1,7 +1,7 @@
 name: Debug SVC-RS (temporario)
 
 on:
-  workflow_dispatch: {}   # só roda quando você clicar em "Run workflow"
+  workflow_dispatch: {}
 
 jobs:
   debug:
@@ -16,13 +16,7 @@ jobs:
           python-version: "3.x"
 
       - name: Instalar dependencias
-        run: pip install requests
+        run: pip install requests beautifulsoup4
 
-      - name: Baixar HTML real da pagina SVC-RS
+      - name: Ler pagina SVC-RS e mostrar no log
         run: python debug_svc_rs.py
-
-      - name: Publicar como artefato pra download
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-svc-rs
-          path: debug_svc_rs.html

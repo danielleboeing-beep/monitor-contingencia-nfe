@@ -51,18 +51,19 @@ SECONDS_BETWEEN_CHECKS = 150
 
 # ---------------------------------------------------------------- COLETA
 
-def buscar_com_retry(url, tentativas=3, espera_segundos=5):
-    """Busca a URL com ate 3 tentativas, para nao derrubar tudo por causa
-    de uma instabilidade passageira do site (comum em portais de governo)."""
+def buscar_com_retry(url, tentativas=2, espera_segundos=3):
+    """Busca a URL com ate 2 tentativas, para nao derrubar tudo por causa
+    de uma instabilidade passageira do site (comum em portais de governo).
+    Timeout curto (10s) para nao ficar presa se o site nao responder."""
     ultimo_erro = None
     for tentativa in range(1, tentativas + 1):
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=20)
+            resp = requests.get(url, headers=HEADERS, timeout=(5, 10))
             resp.encoding = resp.apparent_encoding or "utf-8"
             return resp
         except requests.RequestException as erro:
             ultimo_erro = erro
-            print(f"[AVISO] Tentativa {tentativa}/{tentativas} falhou para {url}: {erro}")
+            print(f"[AVISO] Tentativa {tentativa}/{tentativas} falhou para {url}: {erro}", flush=True)
             if tentativa < tentativas:
                 time.sleep(espera_segundos)
     raise ultimo_erro
@@ -189,12 +190,12 @@ def checar_e_alertar():
     try:
         ativas_novas, agendadas_novas = status_svc_an_nacional()
     except Exception as erro:  # noqa: BLE001
-        print(f"[ERRO] Nao foi possivel ler o Portal Nacional agora: {erro}")
+        print(f"[ERRO] Nao foi possivel ler o Portal Nacional agora: {erro}", flush=True)
 
     try:
         svc_rs_novo = status_svc_rs()
     except Exception as erro:  # noqa: BLE001
-        print(f"[ERRO] Nao foi possivel ler o SVC-RS agora: {erro}")
+        print(f"[ERRO] Nao foi possivel ler o SVC-RS agora: {erro}", flush=True)
 
     # --- SVC-AN ativada: transicoes ---
     for uf in ativas_novas - ativas_antigas:
@@ -222,7 +223,7 @@ def checar_e_alertar():
         "ultima_verificacao": datetime.now(timezone.utc).isoformat(),
     }
     salvar_estado(novo_estado)
-    print(f"[OK] Verificado em {novo_estado['ultima_verificacao']}")
+    print(f"[OK] Verificado em {novo_estado['ultima_verificacao']}", flush=True)
 
 
 # ---------------------------------------------------------------- MAIN

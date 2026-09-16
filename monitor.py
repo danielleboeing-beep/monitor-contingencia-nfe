@@ -58,7 +58,7 @@ def status_svc_an_nacional():
       agendadas: dict {UF: "DD/MM/AAAA HH:MM:SS a DD/MM/AAAA HH:MM:SS"}
     """
     resp = requests.get(NFE_PRINCIPAL_URL, headers=HEADERS, timeout=30)
-    resp.encoding = "latin-1"
+    resp.encoding = resp.apparent_encoding or "utf-8"
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
     texto = re.sub(r"[ \t\r\n]+", " ", texto)
 
@@ -101,10 +101,13 @@ def status_svc_an_nacional():
 def status_svc_rs():
     """Retorna {UF: (ativa: bool, detalhe: str)} do painel SVC-RS por estado."""
     resp = requests.get(SVC_RS_URL, headers=HEADERS, timeout=30)
-    resp.encoding = "latin-1"
+    resp.encoding = resp.apparent_encoding or "utf-8"
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
     texto = re.sub(r"[ \t\r\n]+", " ", texto)
-    padrao = r"\b([A-Z]{2})\s*-\s*[^|]*\|+\s*(Ativada[^|]*|Desativada)"
+    # A pagina real tem espaco entre os separadores ("| |"), por isso o
+    # conector precisa aceitar um-ou-mais "|" com espacos entre eles,
+    # nao so "|" colados.
+    padrao = r"\b([A-Z]{2})\s*-\s*[^|]*(?:\s*\|\s*)+(Ativada[^|]*|Desativada)"
     return {
         uf: (det.strip().startswith("Ativada"), det.strip())
         for uf, det in re.findall(padrao, texto)

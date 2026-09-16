@@ -6,6 +6,13 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch: {}   # permite rodar manualmente na aba "Actions" pra testar
 
+# Evita que duas execucoes rodem ao mesmo tempo (o que causava o erro de push).
+# Se uma execucao ainda estiver rodando quando a proxima for agendada, essa
+# proxima fica na fila em vez de rodar em paralelo.
+concurrency:
+  group: monitor-contingencia
+  cancel-in-progress: false
+
 permissions:
   contents: write   # necessario para comitar state.json e docs/index.html de volta
 
@@ -36,6 +43,7 @@ jobs:
         run: |
           git config user.name "monitor-contingencia-bot"
           git config user.email "actions@users.noreply.github.com"
+          git pull --rebase origin main
           git add state.json docs/index.html
           git diff --staged --quiet || git commit -m "chore: atualiza estado e painel [skip ci]"
           git push

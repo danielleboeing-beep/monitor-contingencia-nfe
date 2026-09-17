@@ -1,6 +1,39 @@
 {
   "svc_an": {},
   "svc_an_agendadas": {},
-  "svc_rs": {},
-  "ultima_verificacao": "2026-09-17T13:13:19.685733+00:00"
+  "svc_rs": {
+    "AM": {
+      "ativa": false,
+      "desde": null
+    },
+    "BA": {
+      "ativa": false,
+      "desde": null
+    },
+    "GO": {
+      "ativa": false,
+      "desde": null
+    },
+    "MA": {
+      "ativa": false,
+      "desde": null
+    },
+    "MS": {
+      "ativa": false,
+      "desde": null
+    },
+    "MT": {
+      "ativa": false,
+      "desde": null
+    },
+    "PE": {
+      "ativa": false,
+      "desde": null
+    },
+    "PR": {
+      "ativa": false,
+      "desde": null
+    }
+  },
+  "ultima_verificacao": "2026-09-17T13:30:17.009608+00:00"
 }

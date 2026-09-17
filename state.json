@@ -1,10 +1,5 @@
-{
-  "svc_an_ativas": [],
-  "svc_an_agendadas": {},
-  "svc_rs": {
-    "MS": {
-      "ativa": true
-    }
-  },
-  "ultima_verificacao": "2026-09-17T08:02:32.694447+00:00"
-}
+   {
+     "svc_an": {},
+     "svc_an_agendadas": {},
+     "svc_rs": {}
+   }

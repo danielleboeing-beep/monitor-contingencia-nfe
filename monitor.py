@@ -1,12 +1,13 @@
 """
-Monitor de contingencia NF-e -> alerta no Slack (sem custo, via GitHub Actions).
+Monitor de contingencia NF-e -> alerta no Slack (via GitHub Actions).
 
 Fluxo:
   1. Coleta   -> le o Portal Nacional NF-e (SVC-AN ativada/agendada)
                  e o Painel SVC-RS por estado (SEFAZ/RS)
-  2. Decisao  -> compara com o ultimo estado salvo em state.json
+  2. Decisao  -> compara com o ultimo estado salvo em state.json,
+                 rastreando desde-quando cada UF ficou ativa
   3. Alerta   -> so dispara no Slack quando o estado MUDA (transicao),
-                 nunca repete enquanto o estado for igual ao anterior
+                 informando "desde" e "ate" (quando encerra)
   4. Registro -> grava o novo estado em state.json (comitado de volta
                  pro repositorio pelo workflow do GitHub Actions)
 
@@ -16,7 +17,6 @@ Dependencias: pip install requests beautifulsoup4
 import json
 import os
 import re
-import signal
 import time
 from datetime import datetime, timezone
 
@@ -33,64 +33,41 @@ HEADERS = {
     "Cookie": "AspxAutoDetectCookieSupport=1",
 }
 
-# UFs que a empresa monitora de fato (ajuste para as suas UFs de emissao)
 UFS_MONITORADAS = {"SP", "MG", "PR", "RS", "BA", "AM", "GO", "MA", "MS", "MT", "PE"}
 
 STATE_FILE = "state.json"
 
-# URL do "trigger" do Slack Workflow Builder (guardada como secret no
-# GitHub -> Settings -> Secrets and variables -> Actions -> SLACK_WEBHOOK_URL)
+# URL do "trigger" do Slack Workflow Builder (Settings -> Secrets and
+# variables -> Actions -> SLACK_WEBHOOK_URL)
 SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
-# Quantas checagens fazer dentro de uma unica execucao do workflow, e o
-# intervalo entre elas. 2 checagens x 150s = cobre ~5 minutos, aproximando
-# de uma verificacao a cada 2min30s (o minimo real do GitHub Actions
-# agendado e 5 em 5 minutos).
 NUM_CHECKS_PER_RUN = 2
 SECONDS_BETWEEN_CHECKS = 150
 
 
-class TempoExcedidoErro(Exception):
-    """Erro proprio para forcar a interrupcao de uma chamada de rede presa."""
-
-
-def _alarme(signum, frame):
-    raise TempoExcedidoErro("Tempo limite absoluto excedido (possivel travamento em DNS/conexao)")
-
-
 # ---------------------------------------------------------------- COLETA
 
-def buscar_com_retry(url, tentativas=2, espera_segundos=3, limite_absoluto_segundos=30):
-    """Busca a URL com ate 2 tentativas. Alem do timeout normal do requests,
-    usa um alarme do sistema (SIGALRM) como rede de seguranca: se a chamada
-    travar em qualquer etapa - inclusive resolucao de DNS, que o timeout do
-    requests nem sempre cobre - ela e interrompida na forca depois de
-    `limite_absoluto_segundos`, em vez de travar a execucao inteira."""
+def buscar_com_retry(url, tentativas=2, espera_segundos=3):
+    """Busca a URL com ate 2 tentativas. O timeout do requests ja se
+    mostrou confiavel nos testes - o travamento anterior era um bug de
+    regex (catastrophic backtracking), nao rede."""
     ultimo_erro = None
     for tentativa in range(1, tentativas + 1):
-        handler_anterior = signal.signal(signal.SIGALRM, _alarme)
-        signal.alarm(limite_absoluto_segundos)
         try:
-            resp = requests.get(url, headers=HEADERS, timeout=(20, 20))
-            resp.encoding = resp.apparent_encoding or "utf-8"
+            print(f"[DEBUG] Conectando em {url} (tentativa {tentativa})...", flush=True)
+            resp = requests.get(url, headers=HEADERS, timeout=(10, 15))
+            resp.encoding = "utf-8"
+            print(f"[DEBUG] Resposta recebida de {url}: HTTP {resp.status_code}", flush=True)
             return resp
-        except (requests.RequestException, TempoExcedidoErro) as erro:
+        except requests.RequestException as erro:
             ultimo_erro = erro
             print(f"[AVISO] Tentativa {tentativa}/{tentativas} falhou para {url}: {erro}", flush=True)
             if tentativa < tentativas:
                 time.sleep(espera_segundos)
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, handler_anterior)
     raise ultimo_erro
 
 
 def status_svc_an_nacional():
-    """
-    Le o Portal Nacional e retorna:
-      ativas:    set de UFs com SVC-AN ativada agora
-      agendadas: dict {UF: "DD/MM/AAAA HH:MM:SS a DD/MM/AAAA HH:MM:SS"}
-    """
     resp = buscar_com_retry(NFE_PRINCIPAL_URL)
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
     texto = re.sub(r"[ \t\r\n]+", " ", texto)
@@ -98,11 +75,9 @@ def status_svc_an_nacional():
     ativas = set()
     agendadas = {}
 
-    # --- Ativada na SVC-AN ---
     bloco_ativa = re.search(
         r"Contingência Ativada na SVC-AN(.*?)Contingência Agendada na SVC-AN",
-        texto,
-        re.IGNORECASE,
+        texto, re.IGNORECASE,
     )
     if bloco_ativa:
         trecho = bloco_ativa.group(1)
@@ -111,11 +86,9 @@ def status_svc_an_nacional():
                 if uf in UFS_MONITORADAS:
                     ativas.add(uf)
 
-    # --- Agendada na SVC-AN ---
     bloco_agendada = re.search(
         r"Contingência Agendada na SVC-AN(.*?)(Relação de UFs|Informes|$)",
-        texto,
-        re.IGNORECASE,
+        texto, re.IGNORECASE,
     )
     if bloco_agendada:
         trecho = bloco_agendada.group(1)
@@ -132,19 +105,30 @@ def status_svc_an_nacional():
 
 
 def status_svc_rs():
-    """Retorna {UF: (ativa: bool, detalhe: str)} do painel SVC-RS por estado."""
+    """Retorna {UF: (ativa: bool, detalhe: str)}. Divide o texto por '|'
+    e compara pedaco a pedaco - evita a regex complexa que travava."""
     resp = buscar_com_retry(SVC_RS_URL)
     texto = BeautifulSoup(resp.text, "html.parser").get_text("|")
-    texto = re.sub(r"[ \t\r\n]+", " ", texto)
-    # A pagina real tem espaco entre os separadores ("| |"), por isso o
-    # conector precisa aceitar um-ou-mais "|" com espacos entre eles,
-    # nao so "|" colados.
-    padrao = r"\b([A-Z]{2})\s*-\s*[^|]*(?:\s*\|\s*)+(Ativada[^|]*|Desativada)"
-    return {
-        uf: (det.strip().startswith("Ativada"), det.strip())
-        for uf, det in re.findall(padrao, texto)
-        if uf in UFS_MONITORADAS
-    }
+
+    partes = [p.strip() for p in texto.split("|")]
+    partes = [p for p in partes if p]
+
+    padrao_uf = re.compile(r"^([A-Z]{2})\s*-\s*.+")
+    resultado = {}
+    for i, parte in enumerate(partes):
+        m = padrao_uf.match(parte)
+        if not m:
+            continue
+        uf = m.group(1)
+        if uf not in UFS_MONITORADAS:
+            continue
+        if i + 1 >= len(partes):
+            continue
+        proximo = partes[i + 1]
+        if proximo.startswith("Ativada") or proximo.startswith("Desativada"):
+            resultado[uf] = (proximo.startswith("Ativada"), proximo)
+
+    return resultado
 
 
 # ---------------------------------------------------------------- ESTADO
@@ -153,7 +137,7 @@ def carregar_estado():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"svc_an_ativas": [], "svc_an_agendadas": {}, "svc_rs": {}}
+    return {"svc_an": {}, "svc_an_agendadas": {}, "svc_rs": {}}
 
 
 def salvar_estado(estado):
@@ -163,29 +147,16 @@ def salvar_estado(estado):
 
 # ---------------------------------------------------------------- SLACK
 
-def enviar_slack(uf, svc, situacao):
+def enviar_slack(uf, svc, situacao, desde="", ate=""):
     if not SLACK_WEBHOOK_URL:
-        print("[AVISO] SLACK_WEBHOOK_URL nao configurado - alerta nao enviado.")
+        print("[AVISO] SLACK_WEBHOOK_URL nao configurado - alerta nao enviado.", flush=True)
         return
-
-    horario = datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M:%S")
-
-    # Mandamos o campo em varias grafias (uf/UF, svc/SVC...) porque o nome
-    # exato da variavel no Workflow Builder do Slack pode ter sido salvo
-    # com letra maiuscula ou minuscula - depois de confirmar qual o Slack
-    # espera, pode limpar e deixar so uma versao.
-    payload = {
-        "uf": uf, "UF": uf,
-        "svc": svc, "SVC": svc,
-        "situacao": situacao, "Situacao": situacao,
-        "horario": horario, "Horario": horario,
-    }
-
+    payload = {"UF": uf, "SVC": svc, "Situacao": situacao, "Horario": desde, "Ate": ate}
     try:
         r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=15)
-        print(f"[SLACK] {uf} {svc} {situacao} -> HTTP {r.status_code}")
+        print(f"[SLACK] {uf} {svc} {situacao} (desde {desde}, ate {ate}) -> HTTP {r.status_code}", flush=True)
     except requests.RequestException as erro:
-        print(f"[FALHA SLACK] {uf} {svc} {situacao} -> {erro}")
+        print(f"[FALHA SLACK] {uf} {svc} {situacao} -> {erro}", flush=True)
 
 
 # ---------------------------------------------------------------- DECISAO
@@ -193,49 +164,65 @@ def enviar_slack(uf, svc, situacao):
 def checar_e_alertar():
     estado_anterior = carregar_estado()
 
-    ativas_antigas = set(estado_anterior.get("svc_an_ativas", []))
+    svc_an_antigo = estado_anterior.get("svc_an", {})
     agendadas_antigas = estado_anterior.get("svc_an_agendadas", {})
     svc_rs_antigo = estado_anterior.get("svc_rs", {})
 
-    # Valores padrao: se uma fonte falhar mesmo depois das tentativas,
-    # repete o ultimo estado conhecido dela em vez de travar tudo ou
-    # zerar o que ja sabiamos.
-    ativas_novas, agendadas_novas = ativas_antigas, agendadas_antigas
-    svc_rs_novo = {uf: (v.get("ativa", False), "") for uf, v in svc_rs_antigo.items()}
+    agora = datetime.now(timezone.utc).astimezone().strftime("%d/%m/%Y %H:%M:%S")
+
+    ativas_novas_set = {uf for uf, v in svc_an_antigo.items() if v.get("ativa")}
+    agendadas_novas = agendadas_antigas
+    svc_rs_novo_bruto = {uf: v.get("ativa", False) for uf, v in svc_rs_antigo.items()}
 
     try:
-        ativas_novas, agendadas_novas = status_svc_an_nacional()
+        print("[DEBUG] Iniciando leitura do Portal Nacional...", flush=True)
+        ativas_novas_set, agendadas_novas = status_svc_an_nacional()
+        print("[DEBUG] Portal Nacional lido com sucesso.", flush=True)
     except Exception as erro:  # noqa: BLE001
         print(f"[ERRO] Nao foi possivel ler o Portal Nacional agora: {erro}", flush=True)
 
     try:
-        svc_rs_novo = status_svc_rs()
+        print("[DEBUG] Iniciando leitura do SVC-RS...", flush=True)
+        svc_rs_check = status_svc_rs()
+        svc_rs_novo_bruto = {uf: ativa for uf, (ativa, _det) in svc_rs_check.items()}
+        print("[DEBUG] SVC-RS lido com sucesso.", flush=True)
     except Exception as erro:  # noqa: BLE001
         print(f"[ERRO] Nao foi possivel ler o SVC-RS agora: {erro}", flush=True)
 
-    # --- SVC-AN ativada: transicoes ---
-    for uf in ativas_novas - ativas_antigas:
-        enviar_slack(uf, "SVC-AN", "ativada")
-    for uf in ativas_antigas - ativas_novas:
-        enviar_slack(uf, "SVC-AN", "encerrada")
+    svc_an_novo = {}
+    for uf in ativas_novas_set:
+        anterior = svc_an_antigo.get(uf, {})
+        desde = anterior.get("desde") if anterior.get("ativa") else agora
+        svc_an_novo[uf] = {"ativa": True, "desde": desde}
+        if not anterior.get("ativa"):
+            enviar_slack(uf, "SVC-AN", "ativada", desde=desde, ate="em andamento")
 
-    # --- SVC-AN agendada: transicoes (novo agendamento aparecendo) ---
+    for uf, dados in svc_an_antigo.items():
+        if dados.get("ativa") and uf not in ativas_novas_set:
+            enviar_slack(uf, "SVC-AN", "encerrada", desde=dados.get("desde", ""), ate=agora)
+
     for uf, janela in agendadas_novas.items():
         if agendadas_antigas.get(uf) != janela:
             enviar_slack(uf, "SVC-AN", f"agendada ({janela})")
 
-    # --- SVC-RS por estado: transicoes ---
-    for uf, (ativa, _detalhe) in svc_rs_novo.items():
-        estava_ativa = svc_rs_antigo.get(uf, {}).get("ativa", False)
-        if ativa and not estava_ativa:
-            enviar_slack(uf, "SVC-RS", "ativada")
-        elif not ativa and estava_ativa:
-            enviar_slack(uf, "SVC-RS", "encerrada")
+    svc_rs_novo = {}
+    for uf, ativa in svc_rs_novo_bruto.items():
+        anterior = svc_rs_antigo.get(uf, {})
+        estava_ativa = anterior.get("ativa", False)
+        if ativa:
+            desde = anterior.get("desde") if estava_ativa else agora
+            svc_rs_novo[uf] = {"ativa": True, "desde": desde}
+            if not estava_ativa:
+                enviar_slack(uf, "SVC-RS", "ativada", desde=desde, ate="em andamento")
+        else:
+            svc_rs_novo[uf] = {"ativa": False, "desde": None}
+            if estava_ativa:
+                enviar_slack(uf, "SVC-RS", "encerrada", desde=anterior.get("desde", ""), ate=agora)
 
     novo_estado = {
-        "svc_an_ativas": sorted(ativas_novas),
+        "svc_an": svc_an_novo,
         "svc_an_agendadas": agendadas_novas,
-        "svc_rs": {uf: {"ativa": ativa} for uf, (ativa, _) in svc_rs_novo.items()},
+        "svc_rs": svc_rs_novo,
         "ultima_verificacao": datetime.now(timezone.utc).isoformat(),
     }
     salvar_estado(novo_estado)

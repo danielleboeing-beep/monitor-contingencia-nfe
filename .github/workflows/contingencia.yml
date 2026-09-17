@@ -2,11 +2,9 @@ name: Monitor Contingencia NF-e
 
 on:
   schedule:
-    # Minimo permitido pelo GitHub Actions: 5 em 5 minutos.
     - cron: "*/5 * * * *"
-  workflow_dispatch: {}   # permite rodar manualmente na aba "Actions" pra testar
+  workflow_dispatch: {}
 
-# Evita que duas execucoes rodem ao mesmo tempo.
 concurrency:
   group: monitor-contingencia
   cancel-in-progress: false
@@ -16,8 +14,8 @@ permissions:
 
 jobs:
   checar:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8   # nunca deixa a execucao passar de 8 minutos, mesmo travada
+    runs-on: ubuntu-latest   # de volta pra nuvem - o bug real era a regex, nao a rede
+    timeout-minutes: 8       # rede de seguranca, continua valendo
     steps:
       - name: Checkout do repositorio
         uses: actions/checkout@v4
@@ -35,26 +33,19 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python monitor.py
 
-      - name: Gerar painel (docs/index.html)
-        run: python generate_dashboard.py
-
-      - name: Salvar estado e painel no repositorio (se mudou)
+      - name: Salvar estado no repositorio (se mudou)
         run: |
           set -e
           git config user.name "monitor-contingencia-bot"
           git config user.email "actions@users.noreply.github.com"
 
-          git add state.json docs/index.html
+          git add state.json
           if git diff --staged --quiet; then
             echo "Nada mudou, nada a comitar."
             exit 0
           fi
-          git commit -m "chore: atualiza estado e painel [skip ci]"
+          git commit -m "chore: atualiza estado [skip ci]"
 
-          # Tenta subir; se alguem comitou antes, resolve preferindo a
-          # versao que acabamos de calcular (-X ours), que e sempre a
-          # leitura mais recente do site - nunca deixa marcador de
-          # conflito sobrar no arquivo.
           for i in 1 2 3 4 5; do
             if git push; then
               echo "Push OK."

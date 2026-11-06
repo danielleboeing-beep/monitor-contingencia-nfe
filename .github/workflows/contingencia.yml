@@ -2,6 +2,8 @@ name: Monitor Contingencia NF-e
 
 on:
   schedule:
+    # Minimo permitido pelo GitHub Actions: 5 em 5 minutos.
+    # Cada execucao faz 2 checagens (intervalo de 2min30s).
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
@@ -14,8 +16,8 @@ permissions:
 
 jobs:
   checar:
-    runs-on: ubuntu-latest   # de volta pra nuvem - o bug real era a regex, nao a rede
-    timeout-minutes: 8       # rede de seguranca, continua valendo
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
     steps:
       - name: Checkout do repositorio
         uses: actions/checkout@v4
@@ -28,9 +30,11 @@ jobs:
       - name: Instalar dependencias
         run: pip install requests beautifulsoup4
 
-      - name: Rodar monitor (2 checagens, ~2min30s de intervalo)
+      - name: Rodar monitor
         env:
+          TZ: America/Sao_Paulo   # horarios "agora" no fuso de Brasilia
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL_COMUNICADO: ${{ secrets.SLACK_WEBHOOK_URL_COMUNICADO }}
         run: python monitor.py
 
       - name: Salvar estado no repositorio (se mudou)

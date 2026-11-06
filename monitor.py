@@ -32,17 +32,17 @@ HEADERS = {
 # UFs que a empresa monitora de fato (ajuste para as suas UFs de emissao)
 UFS_MONITORADAS = {"SP", "MG", "PR", "RS", "BA", "AM", "GO", "MA", "MS", "MT", "PE"}
 
-STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state.json")
+STATE_FILE = "state.json"
 
 # URL do "trigger" do Slack Workflow Builder (a mesma que ja configuramos
 # no #incident-fiscal). Fica aqui direto porque o arquivo vive so no seu
 # notebook, nao num repositorio publico.
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/triggers/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"
+SLACK_WEBHOOK_URL = os.environ.get("SLACK_WEBHOOK_URL", "")
 
 # URL do SEGUNDO fluxo do Workflow Builder (o do comunicado "ALERTA FISCAL | NF-e",
 # que posta em outro canal). Cole aqui a URL do gatilho desse novo fluxo.
 # Enquanto estiver vazio, o comunicado simplesmente nao e enviado.
-SLACK_WEBHOOK_URL_COMUNICADO = "https://hooks.slack.com/triggers/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"
+SLACK_WEBHOOK_URL_COMUNICADO = os.environ.get("SLACK_WEBHOOK_URL_COMUNICADO", "")
 
 # Link oficial de cada servico, usado no comunicado.
 LINKS_SVC = {
@@ -330,6 +330,20 @@ def checar_e_alertar():
     print(f"[OK] Verificado em {novo_estado['ultima_verificacao']}", flush=True)
 
 
+NUM_CHECKS_PER_RUN = 2
+SECONDS_BETWEEN_CHECKS = 150
+
+
+def main():
+    print("[INICIO] Script comecou a rodar.", flush=True)
+    for i in range(NUM_CHECKS_PER_RUN):
+        try:
+            checar_e_alertar()
+        except Exception as erro:  # noqa: BLE001
+            print(f"[ERRO] Falha na verificacao: {erro}", flush=True)
+        if i < NUM_CHECKS_PER_RUN - 1:
+            time.sleep(SECONDS_BETWEEN_CHECKS)
+
+
 if __name__ == "__main__":
-    print("[INICIO] Verificacao comecou.", flush=True)
-    checar_e_alertar()
+    main()

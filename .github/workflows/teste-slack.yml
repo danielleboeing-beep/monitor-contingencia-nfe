@@ -1,0 +1,31 @@
+name: Teste Slack (manual)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  testar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      URL_ALERTA: ${{ secrets.SLACK_WEBHOOK_URL }}
+      URL_COMUNICADO: ${{ secrets.SLACK_WEBHOOK_URL_COMUNICADO }}
+    steps:
+      - name: Testar alerta no #incident-fiscal
+        run: |
+          if [ -z "$URL_ALERTA" ]; then
+            echo "Secret SLACK_WEBHOOK_URL nao cadastrado."
+            exit 1
+          fi
+          curl -sS -o /dev/null -w "Alerta -> HTTP %{http_code}\n" \
+            -X POST -H "Content-Type: application/json" \
+            -d '{"UF":"TESTE","SVC":"SVC-RS","Situacao":"teste de integracao","Horario":"06/11/2026 00:00","Ate":"06/11/2026 00:01"}' \
+            "$URL_ALERTA"
+
+      - name: Testar comunicado (so se o secret existir)
+        if: ${{ env.URL_COMUNICADO != '' }}
+        run: |
+          curl -sS -o /dev/null -w "Comunicado -> HTTP %{http_code}\n" \
+            -X POST -H "Content-Type: application/json" \
+            -d '{"UF":"TESTE","Periodo":"06/11 das 00:00 ao dia 06/11 as 00:01","Link":"https://www.sefaz.rs.gov.br/NFE/NFE-SVC.aspx"}' \
+            "$URL_COMUNICADO"

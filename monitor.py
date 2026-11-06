@@ -187,6 +187,17 @@ def salvar_estado(estado):
 # ---------------------------------------------------------------- SLACK
 
 def enviar_slack(uf, svc, situacao, desde="", ate=""):
+    # Trava de seguranca: nunca enviar o alerta com campo vazio.
+    # Dado essencial vazio -> nao envia e registra no log.
+    # Data vazia -> usa um texto padrao no lugar.
+    if not (uf and svc and situacao):
+        print(f"[BLOQUEADO] Alerta NAO enviado, dado essencial vazio: UF={uf!r} SVC={svc!r} Situacao={situacao!r}", flush=True)
+        return
+    if not SLACK_WEBHOOK_URL:
+        print("[AVISO] SLACK_WEBHOOK_URL nao configurado - alerta nao enviado.", flush=True)
+        return
+    desde = desde or "não informado"
+    ate = ate or "não informado"
     payload = {"UF": uf, "SVC": svc, "Situacao": situacao, "Horario": desde, "Ate": ate}
     try:
         r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=15)
@@ -221,9 +232,15 @@ def enviar_comunicado(uf, svc, desde, ate):
     so as variaveis: UF, Periodo e Link."""
     if not SLACK_WEBHOOK_URL_COMUNICADO:
         return
+    periodo = formatar_periodo(desde, ate)
+    # Trava de seguranca: o comunicado e oficial, entao nunca sai com UF ou
+    # periodo vazio. Nesse caso nao envia e registra no log.
+    if not uf or not periodo:
+        print(f"[BLOQUEADO] Comunicado NAO enviado, dado vazio: UF={uf!r} Periodo={periodo!r}", flush=True)
+        return
     payload = {
         "UF": uf,
-        "Periodo": formatar_periodo(desde, ate),
+        "Periodo": periodo,
         "Link": LINKS_SVC.get(svc, ""),
     }
     try:

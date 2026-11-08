@@ -1,10 +1,5 @@
 {
-  "svc_an": {
-    "SP": {
-      "ativa": true,
-      "desde": "08/11/2026 09:02:40"
-    }
-  },
+  "svc_an": {},
   "svc_an_agendadas": {},
   "svc_rs": {
     "AM": {
@@ -41,5 +36,5 @@
     }
   },
   "svc_rs_agendadas": {},
-  "ultima_verificacao": "2026-11-08T12:05:14.868553+00:00"
+  "ultima_verificacao": "2026-11-08T17:53:07.238269+00:00"
 }

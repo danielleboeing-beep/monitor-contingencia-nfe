@@ -1,5 +1,10 @@
 {
-  "svc_an": {},
+  "svc_an": {
+    "MG": {
+      "ativa": true,
+      "desde": "16/11/2026 07:39:13"
+    }
+  },
   "svc_an_agendadas": {},
   "svc_rs": {
     "AM": {
@@ -36,5 +41,5 @@
     }
   },
   "svc_rs_agendadas": {},
-  "ultima_verificacao": "2026-11-16T03:02:08.115386+00:00"
+  "ultima_verificacao": "2026-11-16T10:41:46.064218+00:00"
 }
